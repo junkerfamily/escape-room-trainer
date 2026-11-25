@@ -21,6 +21,7 @@
 
   // Per-lesson state for this view
   let view = { hintsShown: 0, startedAt: Date.now(), solvedNow: false, advanceTimer: null };
+  let board = null; // active Slider instance on slider lessons
   const sessionStart = Date.now();
 
   const norm = (s) => s.toUpperCase()
@@ -80,7 +81,8 @@
     const i = idx(current);
     const prev = ordered[i - 1], next = ordered[i + 1];
     clearTimeout(view.advanceTimer);
-    view = { hintsShown: p.solved ? 0 : 0, startedAt: Date.now(), solvedNow: false, advanceTimer: null };
+    view = { hintsShown: 0, startedAt: Date.now(), solvedNow: false, advanceTimer: null };
+    if (board) { board.destroy(); board = null; }
 
     main.innerHTML = `<article class="lesson">
       <div class="crumbs"><span class="chip">${cat.icon} ${cat.name}</span><span>${i + 1} of ${ordered.length}</span>
@@ -99,7 +101,7 @@
           ${l.toggle ? `<button class="btn ghost toggle-btn" id="toggleBtn">${l.toggle.label} <kbd>T</kbd></button>` : ""}
         </section>
       </div>
-      <section class="card puzzle">
+      ${l.slider ? sliderSection(l) : `<section class="card puzzle">
         <div class="puzzle-head"><h2>Your turn</h2><span class="timer" id="lessonTimer">0:00</span></div>
         <p class="prompt">${l.puzzle.prompt}</p>
         <form class="answer-row" id="answerForm" autocomplete="off">
@@ -113,7 +115,7 @@
         <div class="feedback" id="feedback" role="status"></div>
         <ul class="hints" id="hints"></ul>
         <div id="explainBox"></div>
-      </section>
+      </section>`}
       <nav class="pager">
         <button class="btn ghost" id="prevBtn" ${prev ? "" : "disabled"}>← ${prev ? esc(prev.title) : ""}</button>
         <button class="btn ghost" id="nextBtn" ${next ? "" : "disabled"}>${next ? esc(next.title) : ""} →</button>
@@ -121,7 +123,8 @@
     </article>`;
 
     main.scrollTop = 0;
-    $("#answerForm").onsubmit = (e) => { e.preventDefault(); if (view.solvedNow) return goNext(); check(); };
+    if (l.slider) mountSlider(l);
+    else $("#answerForm").onsubmit = (e) => { e.preventDefault(); if (view.solvedNow) return goNext(); check(); };
     $("#hintBtn").onclick = hint;
     $("#revealBtn").onclick = reveal;
     $("#prevBtn").onclick = () => prev && go(prev.id);
@@ -132,7 +135,58 @@
     history.replaceState(null, "", "#" + current);
     renderNav(); renderStats();
     // Focus answer box on desktop so you can type immediately
-    if (window.matchMedia("(min-width: 721px)").matches) $("#answer").focus({ preventScroll: true });
+    if (!l.slider && window.matchMedia("(min-width: 721px)").matches) $("#answer").focus({ preventScroll: true });
+  }
+
+  // ---- Slider lessons ----
+  function sliderSection(l) {
+    return `<section class="card puzzle slider-card">
+      <div class="puzzle-head"><h2>Your turn</h2><span class="moves" id="moveCount">0 moves</span><span class="timer" id="lessonTimer">0:00</span></div>
+      <p class="prompt">${l.puzzle.prompt}</p>
+      <div class="slider-wrap">
+        <div class="slider-board" id="board" aria-label="Sliding puzzle"></div>
+        <div class="slider-side">
+          <div class="stage-name" id="stageName"></div>
+          <p class="coach" id="coach"></p>
+          <div class="actions">
+            <button class="btn ghost small" id="hintBtn">Show next move <kbd>H</kbd></button>
+            <button class="btn ghost small" id="revealBtn">Watch it solve <kbd>R</kbd></button>
+            <button class="btn ghost small" id="scrambleBtn">New scramble <kbd>S</kbd></button>
+          </div>
+          <p class="key-help">Click a tile in line with the gap, or use the arrow keys (the arrow is the way the tile moves).</p>
+        </div>
+      </div>
+      <div class="feedback" id="feedback" role="status"></div>
+      <div id="explainBox"></div>
+    </section>`;
+  }
+
+  function mountSlider(l) {
+    const fb = $("#feedback");
+    board = Slider.mount($("#board"), {
+      mode: l.slider.mode,
+      onMove: (n) => { $("#moveCount").textContent = `${n} move${n === 1 ? "" : "s"}`; },
+      onStage: (key, advanced) => {
+        const st = Slider.STAGES[key];
+        $("#stageName").textContent = st.name;
+        $("#coach").textContent = st.coach;
+        if (l.slider.mode === "full" && !view.solvedNow) {
+          fb.className = advanced ? "feedback ok" : "feedback";
+          fb.textContent = advanced ? `✓ Stage done. On to ${st.name.split("· ")[1].toLowerCase()}.` : "";
+        }
+      },
+      onSolved: (moves) => markSolved(`in ${moves} moves`),
+    });
+    $("#scrambleBtn").onclick = newScramble;
+  }
+
+  function newScramble() {
+    if (!board) return;
+    clearTimeout(view.advanceTimer);
+    view = { hintsShown: 0, startedAt: Date.now(), solvedNow: false, advanceTimer: null };
+    $("#feedback").className = "feedback"; $("#feedback").textContent = "";
+    $("#explainBox").innerHTML = "";
+    board.scramble();
   }
 
   function lesson() { return ordered[idx(current)]; }
@@ -143,7 +197,15 @@
   }
 
   function hint() {
-    const l = lesson(), h = l.puzzle.hints;
+    const l = lesson();
+    if (l.slider) {
+      if (!board || !board.hint()) return;
+      view.hintsShown++;
+      const p = progress[l.id] ||= {};
+      if (!p.solved) { p.hints = (p.hints || 0) + 1; save(STORE_KEY, progress); }
+      return;
+    }
+    const h = l.puzzle.hints;
     if (view.hintsShown >= h.length) return;
     view.hintsShown++;
     $("#hints").insertAdjacentHTML("beforeend", `<li><b>Hint ${view.hintsShown}</b>${h[view.hintsShown - 1]}</li>`);
@@ -164,20 +226,8 @@
     input.classList.remove("wrong", "right");
     void input.offsetWidth; // restart shake animation
     if (l.puzzle.answers.map(norm).includes(guess)) {
-      const secs = (Date.now() - view.startedAt) / 1000;
-      const p = progress[l.id] ||= {};
-      const first = !p.solved;
-      p.solved = true;
-      if (!p.revealed) p.best = p.best ? Math.min(p.best, secs) : secs;
-      save(STORE_KEY, progress);
       input.classList.add("right");
-      view.solvedNow = true;
-      const clean = !p.hints && !p.revealed;
-      fb.className = "feedback ok";
-      fb.textContent = `${clean ? "★ Clean solve!" : "✓ Correct!"} ${fmt(secs)}${autoAdvance.checked ? " · next up…" : " · press Enter for next"}`;
-      showExplain(l.puzzle.explain);
-      renderNav(); renderStats();
-      if (autoAdvance.checked && first !== undefined) view.advanceTimer = setTimeout(goNext, 1400);
+      markSolved();
     } else {
       input.classList.add("wrong");
       fb.className = "feedback bad";
@@ -185,8 +235,39 @@
     }
   }
 
+  function markSolved(extra = "") {
+    const l = lesson(), fb = $("#feedback");
+    const secs = (Date.now() - view.startedAt) / 1000;
+    if (view.autoUsed) { // the coach solved it: show the idea, but it doesn't count
+      fb.className = "feedback";
+      fb.textContent = "That's the method. Press S for a new scramble and try it yourself.";
+      showExplain(l.puzzle.explain);
+      return;
+    }
+    const p = progress[l.id] ||= {};
+    // Sliders can be replayed, so a clean run (no "next move" hints) upgrades the record
+    const clean = l.slider ? view.hintsShown === 0 : !p.hints && !p.revealed;
+    if (l.slider && clean) { p.hints = 0; p.revealed = false; }
+    p.solved = true;
+    if (!p.revealed) p.best = p.best ? Math.min(p.best, secs) : secs;
+    save(STORE_KEY, progress);
+    view.solvedNow = true;
+    fb.className = "feedback ok";
+    fb.textContent = `${clean ? "★ Clean solve!" : "✓ Solved!"} ${fmt(secs)}${extra ? " · " + extra : ""}${autoAdvance.checked && !l.slider ? " · next up…" : l.slider ? " · S to go again, Enter for next" : " · press Enter for next"}`;
+    showExplain(l.puzzle.explain);
+    renderNav(); renderStats();
+    if (autoAdvance.checked && !l.slider) view.advanceTimer = setTimeout(goNext, 1400);
+  }
+
   function reveal() {
     const l = lesson(), p = progress[l.id] ||= {};
+    if (l.slider) {
+      if (!board || board.isSolved() || !board.autoSolve()) return;
+      view.autoUsed = true;
+      $("#feedback").className = "feedback";
+      $("#feedback").textContent = "Watch the coach. Then hit New scramble (S) and try it yourself.";
+      return;
+    }
     if (!p.solved) p.revealed = true;
     save(STORE_KEY, progress);
     $("#answer").value = l.puzzle.answers[0];
@@ -236,6 +317,8 @@
       return;
     }
     const k = e.key.toLowerCase();
+    if (board && board.handleKey(e)) { e.preventDefault(); return; }
+    if (board && k === "s") { newScramble(); return; }
     if (k === "arrowdown" || k === "j") { e.preventDefault(); goNext(); }
     else if (k === "arrowup" || k === "k") { e.preventDefault(); goPrev(); }
     else if (k === "h") hint();
@@ -250,7 +333,7 @@
   setInterval(() => {
     $("#sessionTime").textContent = fmt((Date.now() - sessionStart) / 1000);
     const t = $("#lessonTimer");
-    if (t && !view.solvedNow) t.textContent = fmt((Date.now() - view.startedAt) / 1000);
+    if (t && !view.solvedNow && !view.autoUsed) t.textContent = fmt((Date.now() - view.startedAt) / 1000);
   }, 500);
 
   window.addEventListener("hashchange", () => { const id = location.hash.slice(1); if (id !== current) go(id); });
