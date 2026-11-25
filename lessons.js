@@ -165,12 +165,38 @@ function cipherWheel(shift) {
   return svg(out);
 }
 
+/* Mini 3x3 slider diagram. cells: 9 values (number, "x" = any other tile, 0 = gap). hl: tiles to highlight. */
+function boardSvg(cells, x, y, hl = [], s = 32) {
+  const g = 3;
+  let out = `<rect x="${x - 4}" y="${y - 4}" width="${3 * s + 2 * g + 8}" height="${3 * s + 2 * g + 8}" rx="8" class="plate"/>`;
+  cells.forEach((v, i) => {
+    const cx = x + (i % 3) * (s + g), cy = y + ((i / 3) | 0) * (s + g);
+    if (v === 0) { out += `<rect x="${cx + 1}" y="${cy + 1}" width="${s - 2}" height="${s - 2}" rx="5" class="faint dashed"/>`; return; }
+    const on = hl.includes(v), any = v === "x";
+    out += `<rect x="${cx}" y="${cy}" width="${s}" height="${s}" rx="5" class="${on ? "fa" : any ? "faint-fill" : "card"}"/>`;
+    out += txt(cx + s / 2, cy + s / 2 + 6, any ? "·" : v, on ? "on-accent" : any ? "muted" : "mono-t", 17);
+  });
+  return out;
+}
+
+const arrowR = (x, y) => `<path d="M${x} ${y}H${x + 22}M${x + 15} ${y - 6}L${x + 22} ${y}L${x + 15} ${y + 6}" class="ln"/>`;
+
+/* Three boards in a row with arrows and captions. */
+function boardSteps(steps) {
+  const xs = [14, 147, 280];
+  return svg(steps.map((st, i) =>
+    boardSvg(st.cells, xs[i], 40, st.hl) + txt(xs[i] + 51, 172, st.cap, "muted", 12) +
+    (st.cap2 ? txt(xs[i] + 51, 189, st.cap2, "muted", 12) : "") +
+    (i < steps.length - 1 ? arrowR(xs[i] + 109, 91) : "")).join(""), 400, 205);
+}
+
 /* ---------- Lessons ---------- */
 
 const CATEGORIES = [
   { id: "strategy", name: "Strategy", icon: "◎" },
   { id: "codes", name: "Codes & Ciphers", icon: "✎" },
   { id: "locks", name: "Locks & Keys", icon: "⚿" },
+  { id: "slider", name: "Slider Puzzles", icon: "▦" },
   { id: "logic", name: "Patterns & Logic", icon: "◇" },
   { id: "themes", name: "Themes", icon: "☗" },
 ];
@@ -551,6 +577,87 @@ const LESSONS = [
     },
   },
 
+  /* ===== SLIDER PUZZLES ===== */
+  {
+    id: "slide-top", cat: "slider", title: "Slider 1: Top Row & the Corner Trick",
+    summary: "The top row you already know. The one trick worth keeping: never place the last tile of a row directly.",
+    body: `<p>A 3×3 slider is solved in <b>three stages</b>, not row by row: top row, then the left column, then a tiny 2×2 spin. This lesson warms up stage one.</p>
+      <ul><li>Place <b>1</b>, then <b>2</b>. Easy.</li>
+      <li>Don't try to push <b>3</b> straight in. It knocks 2 out. Instead <b>park 2 in the corner</b> (where 3 belongs) with <b>3 right below it</b>.</li>
+      <li>Bring the gap to 2's home, then slide <b>2 left</b> and <b>3 up</b>. Both lock in together.</li></ul>
+      <p>This exact "park and roll" move is what cracks the bottom rows too.</p>`,
+    tells: ["8 numbered tiles and one gap", "A picture cut into a 3×3 grid", "Wooden blocks on a lock box"],
+    visual: boardSteps([
+      { cells: [1, 0, 2, "x", "x", 3, "x", "x", "x"], hl: [2, 3], cap: "Park 2 in the corner,", cap2: "3 under it" },
+      { cells: [1, 2, 0, "x", "x", 3, "x", "x", "x"], hl: [2, 3], cap: "Slide 2 left" },
+      { cells: [1, 2, 3, "x", "x", 0, "x", "x", "x"], hl: [2, 3], cap: "Slide 3 up. Done" },
+    ]),
+    slider: { mode: "top" },
+    puzzle: {
+      prompt: "Get 1, 2, 3 across the top. Click a tile next to the gap (or use the arrow keys) to slide it.",
+      explain: "Corner trick: 2 in the corner, 3 under it, gap where 2 goes, then roll them in. The same trick works on any row or column.",
+    },
+  },
+  {
+    id: "slide-col", cat: "slider", title: "Slider 2: The Bottom Fix (4 over 7)",
+    summary: "This is why the bottom row is a killer: you're solving the wrong row. Do the left column next instead.",
+    body: `<p>If you solve the middle row (4 5 6) next, you're left with only 3 cells of room for 7 and 8, and there's no space to move. That's the trap.</p>
+      <p><b>The fix:</b> once the top row is done, treat it as glued down and solve the <b>left column: 4 on top of 7</b>. Use the same corner trick, turned sideways:</p>
+      <ul><li>Put <b>4 in the bottom-left corner</b> (where 7 belongs).</li>
+      <li>Put <b>7 right beside it</b>, to the right.</li>
+      <li>Bring the gap to 4's home (middle-left), then slide <b>4 up</b> and <b>7 left</b>.</li></ul>
+      <p><b>Stuck case:</b> 7 is sitting in 4's spot? Move it out to the right side first, then set up the corner again.</p>`,
+    tells: ["Top row is done, the rest is a mess", "You keep breaking 4 5 6 trying to fit 7 and 8"],
+    visual: boardSteps([
+      { cells: [1, 2, 3, 0, "x", "x", 4, 7, "x"], hl: [4, 7], cap: "4 in the corner,", cap2: "7 beside it" },
+      { cells: [1, 2, 3, 4, "x", "x", 0, 7, "x"], hl: [4, 7], cap: "Slide 4 up" },
+      { cells: [1, 2, 3, 4, "x", "x", 7, 0, "x"], hl: [4, 7], cap: "Slide 7 left. Done" },
+    ]),
+    slider: { mode: "col" },
+    puzzle: {
+      prompt: "The top row is locked for you. Get 4 into the middle-left and 7 into the bottom-left.",
+      explain: "4 parked low, 7 beside it, gap above, then roll: 4 up, 7 left. Now only a 2×2 square is left, and that part is easy.",
+    },
+  },
+  {
+    id: "slide-last", cat: "slider", title: "Slider 3: Spin the Last Square",
+    summary: "With 1 2 3 4 7 done, only four cells remain. Just go around in a circle.",
+    body: `<p>The last three tiles (5, 6, 8) and the gap live in a 2×2 square. There's only one thing you can do there: <b>rotate</b>.</p>
+      <ul><li>Pick a direction (say, clockwise) and keep walking the gap around the square.</li>
+      <li>Each full lap shifts the three tiles one step around. Within 12 moves it <b>must</b> line up.</li>
+      <li>If it never lines up, the puzzle was put together wrong (two tiles swapped). In a real room, tell the game master.</li></ul>`,
+    tells: ["Only 5, 6, 8 left out of place", "Tiles are in the right order but shifted around"],
+    visual: boardSteps([
+      { cells: [1, 2, 3, 4, 0, 5, 7, 8, 6], hl: [5, 6, 8], cap: "Gap goes right" },
+      { cells: [1, 2, 3, 4, 5, 0, 7, 8, 6], hl: [5, 6, 8], cap: "Gap goes down" },
+      { cells: [1, 2, 3, 4, 5, 6, 7, 8, 0], hl: [5, 6, 8], cap: "Solved" },
+    ]),
+    slider: { mode: "last" },
+    puzzle: {
+      prompt: "Spin the last 2×2 square until the board reads 1 to 8.",
+      explain: "In the last square you can only rotate. Keep going one way and it always lines up.",
+    },
+  },
+  {
+    id: "slide-full", cat: "slider", title: "Slider 4: Full Run",
+    summary: "Put it all together on a fully scrambled board. The coach tracks which stage you're on.",
+    body: `<p>The whole method in three steps:</p>
+      <ul><li><b>1 · Top row:</b> 1, 2, then the corner trick for 3.</li>
+      <li><b>2 · Left column:</b> 4 in the bottom-left corner, 7 beside it, roll them in.</li>
+      <li><b>3 · Spin:</b> rotate the last 2×2 until it clicks.</li></ul>
+      <p>Don't touch anything you've already solved. If you knock a tile out, the coach drops you back a stage. Hit <b>New scramble</b> and race your best time.</p>`,
+    tells: ["Any 3×3 slider", "Picture sliders: work out which piece is the top-left first"],
+    visual: boardSteps([
+      { cells: [1, 2, 3, "x", "x", "x", "x", "x", 0], hl: [1, 2, 3], cap: "1 · Top row" },
+      { cells: [1, 2, 3, 4, "x", "x", 7, "x", 0], hl: [4, 7], cap: "2 · Left column" },
+      { cells: [1, 2, 3, 4, 5, 6, 7, 8, 0], hl: [5, 6, 8], cap: "3 · Spin the square" },
+    ]),
+    slider: { mode: "full" },
+    puzzle: {
+      prompt: "Solve the whole board: top row, left column, then spin.",
+      explain: "Top row → left column (4 over 7) → spin the last square. Same three steps every time.",
+    },
+  },
   /* ===== LOGIC ===== */
   {
     id: "sequence", cat: "logic", title: "Number Sequences",
